@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#000000" />
+    <title>PHANTOM ARSENAL</title>
+    <meta name="description" content="Command a floating arsenal of cursed swords with your hands. Webcam hand tracking, mouse and demo modes." />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23000'/%3E%3Cpath d='M16 2l3 17h-6z' fill='%23d7dae6'/%3E%3Cpath d='M8 20h16v2H8zM15 22h2v6h-2z' fill='%23a66bff'/%3E%3C/svg%3E" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <div id="app">
+      <div id="stage" aria-label="3D sword chamber"></div>
+      <div id="veil"></div>
+      <div id="handCursor" aria-hidden="true"></div>
+
+      <!-- ============ HUD ============ -->
+      <div id="hud" class="hud is-hidden">
+        <header class="hud-top">
+          <div class="hud-left">
+            <div class="brand">PHANTOM <span>ARSENAL</span></div>
+            <ul class="chips" aria-label="Status">
+              <li class="chip" id="chipCamera"><i class="dot"></i><b>CAMERA</b><span id="camStatus">IDLE</span></li>
+              <li class="chip" id="chipTrack"><i class="dot"></i><b>TRACKING</b><span id="trackStatus">—</span></li>
+              <li class="chip"><b>SWORDS</b><span id="swordCount">1</span></li>
+              <li class="chip"><b>FPS</b><span id="fpsValue">--</span><em id="qualityValue"></em></li>
+            </ul>
+          </div>
+
+          <div class="hud-center">
+            <div class="selector" id="inputSelector" role="group" aria-label="Input mode">
+              <button data-input="camera" data-ui title="Hand tracking (I cycles inputs)">CAMERA</button>
+              <button data-input="mouse" data-ui title="Mouse &amp; keyboard">MOUSE</button>
+              <button data-input="demo" data-ui title="Automatic demonstration">DEMO</button>
+            </div>
+            <div class="active-input" id="activeInput">INPUT · —</div>
+          </div>
+
+          <div class="hud-right">
+            <button class="icon-btn" id="btnPreview" data-ui title="Camera preview (B)" aria-pressed="true">
+              <svg viewBox="0 0 24 24"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg><span>Preview</span>
+            </button>
+            <button class="icon-btn" id="btnHelp" data-ui title="Gesture reference (H)" aria-pressed="true">
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.5"/><path d="M9.5 9.5a2.6 2.6 0 115 .8c0 1.7-2.5 2-2.5 3.7M12 17.2v.1"/></svg><span>Guide</span>
+            </button>
+            <button class="icon-btn" id="btnReset" data-ui title="Reset scene (R)">
+              <svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 108-8M4 4v5h5"/></svg><span>Reset</span>
+            </button>
+            <button class="icon-btn" id="btnFullscreen" data-ui title="Fullscreen (F)">
+              <svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg><span>Fullscreen</span>
+            </button>
+          </div>
+        </header>
+
+        <aside class="panel ref" id="refPanel" data-ui aria-label="Gesture reference">
+          <div class="panel-title"><span id="refTitle">GESTURES</span><button id="refClose" class="x" title="Close (H)">×</button></div>
+          <ul id="refList"></ul>
+        </aside>
+
+        <div class="camcard" id="camCard" data-ui>
+          <video id="camVideo" playsinline muted></video>
+          <canvas id="camOverlay"></canvas>
+          <div class="cam-label" id="camLabel">NO SIGNAL</div>
+        </div>
+
+        <div class="hud-bottom">
+          <div class="bottom-left">
+            <div class="selector tall" id="modeSelector" role="group" aria-label="Game mode">
+              <button data-mode="solo" data-ui title="One blade follows you (1)"><kbd>1</kbd>SOLO</button>
+              <button data-mode="arsenal" data-ui title="A formation floats around you (2)"><kbd>2</kbd>ARSENAL</button>
+              <button data-mode="master" data-ui title="Everything combined (3)"><kbd>3</kbd>MASTER</button>
+            </div>
+            <div class="mode-desc" id="modeDesc"></div>
+          </div>
+
+          <div class="bottom-center">
+            <div class="gesture" id="gestureLabel">—</div>
+            <div class="action" id="actionLabel"></div>
+            <div class="formation-name" id="formationLabel"></div>
+          </div>
+
+          <div class="bottom-right panel swords" id="swordPanel" data-ui aria-label="Sword selection">
+            <div class="panel-title"><span>ARMORY</span><kbd>TAB</kbd></div>
+            <div class="sword-grid" id="swordGrid"></div>
+          </div>
+        </div>
+
+        <div id="toasts" class="toasts" aria-live="polite"></div>
+      </div>
+
+      <!-- ============ Positioning guide / camera loading ============ -->
+      <section id="guide" class="overlay guide is-hidden" aria-live="polite">
+        <div class="guide-card">
+          <svg class="hand-guide" viewBox="0 0 120 150" aria-hidden="true">
+            <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="3 5">
+              <path d="M38 92V40a7 7 0 0114 0v34"/>
+              <path d="M52 70V24a7 7 0 0114 0v46"/>
+              <path d="M66 70V28a7 7 0 0114 0v44"/>
+              <path d="M80 76V42a7 7 0 0114 0v52"/>
+              <path d="M38 80l-12-14a7 7 0 00-11 8l22 34c8 14 18 22 34 22 20 0 32-14 32-36V76"/>
+            </g>
+          </svg>
+          <div class="guide-title" id="guideTitle">Awakening the arsenal…</div>
+          <div class="guide-text" id="guideText">Requesting camera access.</div>
+          <div class="guide-steps" id="guideSteps">
+            <span>Face the camera</span><span>Hold your hand ~50 cm away</span><span>Palm open, fingers visible</span>
+          </div>
+          <div class="guide-actions">
+            <button class="btn ghost" id="guideMouse">Use mouse instead</button>
+            <button class="btn ghost" id="guideDemo">Watch demo</button>
+          </div>
+          <div class="guide-note">Everything is processed locally. Your video never leaves this device.</div>
+        </div>
+      </section>
+
+      <!-- ============ Title ============ -->
+      <section id="title" class="overlay title" aria-label="Title screen">
+        <div class="title-inner">
+          <div class="title-kicker">A COVENANT OF STEEL AND SHADOW</div>
+          <h1 class="title-name"><span>PHANTOM</span><span>ARSENAL</span></h1>
+          <div class="title-rule"><i></i></div>
+          <p class="title-sub">Command a floating arsenal of cursed blades with nothing but your hands.</p>
+          <button class="btn primary" id="btnStart" data-ui>Start Experience</button>
+          <div class="title-alt">
+            <button class="link" id="titleMouse" data-ui>Enter with mouse</button>
+            <span>·</span>
+            <button class="link" id="titleDemo" data-ui>Watch demo</button>
+          </div>
+          <div class="title-note">The webcam is requested only after you press Start. Video is processed on this device and never uploaded.</div>
+        </div>
+      </section>
+
+      <noscript><div class="overlay title"><div class="title-inner"><p class="title-sub">PHANTOM ARSENAL needs JavaScript and WebGL.</p></div></div></noscript>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
