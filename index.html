@@ -41,6 +41,9 @@
           </div>
 
           <div class="hud-right">
+            <button class="icon-btn" id="btnLab" data-ui title="Gesture Lab: change gestures, create tasks and courses (G)">
+              <svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg><span>Lab</span>
+            </button>
             <button class="icon-btn" id="btnPreview" data-ui title="Camera preview (B)" aria-pressed="true">
               <svg viewBox="0 0 24 24"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg><span>Preview</span>
             </button>
@@ -67,12 +70,40 @@
           <div class="cam-label" id="camLabel">NO SIGNAL</div>
         </div>
 
+        <div class="trial-hud is-hidden" id="trialHud" data-ui aria-label="Trial status">
+          <div class="trial-row">
+            <div class="trial-stats">
+              <div><b>SCORE</b><span id="trScore">0</span></div>
+              <div><b>COMBO</b><span id="trCombo">0</span></div>
+              <div><b>SHIELDS</b><span id="trShields" class="pips"></span></div>
+              <div><b id="trLevelLabel">LEVEL</b><span id="trLevel">1</span></div>
+              <div><b>BEST</b><span id="trBest">0</span></div>
+            </div>
+            <div class="trial-tools">
+              <select id="courseSelect" class="lab-sel small" aria-label="Course"></select>
+              <button class="lab-btn" id="trRestart" title="Restart the course">Restart</button>
+              <button class="lab-btn" id="trLab" title="Edit gestures, tasks and courses (G)">Lab</button>
+            </div>
+          </div>
+          <div class="trial-next" id="trNext">Obstacles incoming…</div>
+        </div>
+        <div class="trial-banner" id="trBanner" aria-live="polite"></div>
+        <div class="trial-over is-hidden" id="trOver" data-ui role="dialog" aria-label="Trial result">
+          <div class="trial-over-title" id="trOverTitle">TRIAL ENDED</div>
+          <div class="trial-over-stats" id="trOverStats"></div>
+          <div class="trial-over-actions">
+            <button class="btn primary" id="trRetry">Try again</button>
+            <button class="btn ghost" id="trOverLab">Open Lab</button>
+          </div>
+        </div>
+
         <div class="hud-bottom">
           <div class="bottom-left">
             <div class="selector tall" id="modeSelector" role="group" aria-label="Game mode">
               <button data-mode="solo" data-ui title="One blade follows you (1)"><kbd>1</kbd>SOLO</button>
               <button data-mode="arsenal" data-ui title="A formation floats around you (2)"><kbd>2</kbd>ARSENAL</button>
               <button data-mode="master" data-ui title="Everything combined (3)"><kbd>3</kbd>MASTER</button>
+              <button data-mode="trial" data-ui title="Obstacle course: rings and blocks need specific moves (4)"><kbd>4</kbd>TRIAL</button>
             </div>
             <div class="mode-desc" id="modeDesc"></div>
           </div>
@@ -91,6 +122,9 @@
 
         <div id="toasts" class="toasts" aria-live="polite"></div>
       </div>
+
+      <!-- ============ Gesture Lab ============ -->
+      <section id="lab" class="overlay lab is-hidden" aria-label="Gesture Lab"></section>
 
       <!-- ============ Positioning guide / camera loading ============ -->
       <section id="guide" class="overlay guide is-hidden" aria-live="polite">
@@ -129,6 +163,8 @@
             <button class="link" id="titleMouse" data-ui>Enter with mouse</button>
             <span>·</span>
             <button class="link" id="titleDemo" data-ui>Watch demo</button>
+            <span>·</span>
+            <button class="link" id="titleLab" data-ui>Gesture Lab</button>
           </div>
           <div class="title-note">The webcam is requested only after you press Start. Video is processed on this device and never uploaded.</div>
         </div>

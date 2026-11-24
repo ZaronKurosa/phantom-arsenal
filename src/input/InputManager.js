@@ -5,7 +5,16 @@ import { createControlState } from './ControlState.js';
 
 export const INPUT_MODES = ['camera', 'mouse', 'demo'];
 const CAMERA_DEADLINE_MS = 30000;
-const GESTURE_EVENTS = ['dash', 'swipe', 'spin', 'teleport', 'cinematic'];
+// physical event name -> trigger id (the ActionMap decides what each trigger does)
+const CAMERA_TRIGGERS = { dash: 'cam.flick', swipe: 'cam.swipe', spin: 'cam.wristSpin', teleport: 'cam.pinchRelease', cinematic: 'cam.twoPalms' };
+const MOUSE_TRIGGERS = { dash: 'mouse.click', spin: 'mouse.rightClick', teleport: 'mouse.shiftRelease', cinematic: 'mouse.middleClick', summon: 'mouse.doubleClick' };
+const POSE_COOLDOWN_MS = 600;
+const ARROWS = {
+  ArrowRight: { axis: 'right', dir: { x: 1, y: 0 } },
+  ArrowLeft: { axis: 'left', dir: { x: -1, y: 0 } },
+  ArrowUp: { axis: 'up', dir: { x: 0, y: 1 } },
+  ArrowDown: { axis: 'down', dir: { x: 0, y: -1 } },
+};
 
 /**
  * Single entry point for every way of controlling the scene.
@@ -22,13 +31,17 @@ const GESTURE_EVENTS = ['dash', 'swipe', 'spin', 'teleport', 'cinematic'];
  *   'mode' {mode, previous, auto}      active input changed
  *   'busy' {busy, text}                camera is starting up
  *   'notify' {level, title, text, actions}
- *   'gameMode' {mode}                  keyboard 1/2/3 (and demo script)
- *   'dash' 'swipe' 'spin' 'teleport' 'cinematic' 'summon' 'formation'
- *   'reset' 'variant' 'fullscreen' 'help' 'preview'
+ *   'gameMode' {mode}                  keyboard 1/2/3/4 (and demo script)
+ *   'act' {action, trigger, payload}   a physical trigger resolved through the ActionMap
+ *   'dash' 'swipe' 'spin' 'teleport' 'cinematic' 'summon'   (demo script only)
+ *   'reset' 'variant' 'fullscreen' 'help' 'preview' 'lab'
  */
 export class InputManager extends Emitter {
-  constructor({ camera, tracker, gestures, mouseTarget, getGameMode }) {
+  constructor({ camera, tracker, gestures, mouseTarget, getGameMode, actionMap }) {
     super();
+    this.actionMap = actionMap;
+    this._lastPose = 'none';
+    this._poseAt = {};
     this.camera = camera;
     this.tracker = tracker;
     this.gestures = gestures;
@@ -58,9 +71,9 @@ export class InputManager extends Emitter {
 
   _wire() {
     // Gesture events (camera) – forwarded only while the camera is the active input
-    for (const name of GESTURE_EVENTS) {
+    for (const [name, trigger] of Object.entries(CAMERA_TRIGGERS)) {
       this.gestures.on(name, (p) => {
-        if (this.mode === 'camera') this.emit(name, p);
+        if (this.mode === 'camera') this.fire(trigger, p);
       });
     }
 
@@ -73,9 +86,9 @@ export class InputManager extends Emitter {
     });
 
     // Mouse events – only fire while attached (mouse active)
-    for (const name of ['dash', 'spin', 'teleport', 'cinematic', 'summon']) {
+    for (const [name, trigger] of Object.entries(MOUSE_TRIGGERS)) {
       this.mouse.on(name, (p) => {
-        if (this.mode === 'mouse') this.emit(name, p);
+        if (this.mode === 'mouse') this.fire(trigger, p);
       });
     }
     this.mouse.on('twin', ({ on }) => this.emit('notify', { level: 'info', text: on ? 'Twin hands ON — a mirrored second hand joins your cursor.' : 'Twin hands OFF.', timeout: 2600 }));
@@ -95,12 +108,21 @@ export class InputManager extends Emitter {
     window.addEventListener('keydown', (e) => this._onKey(e));
   }
 
+  /** Resolve a physical trigger through the ActionMap and announce the action. */
+  fire(trigger, payload = {}) {
+    const action = this.actionMap ? this.actionMap.resolve(trigger) : null;
+    if (!action) return false;
+    this.emit('act', { action, trigger, payload: payload || {} });
+    return true;
+  }
+
   _onKey(e) {
     if (!this.keysEnabled) return;
     if (e.ctrlKey || e.metaKey) return;
     const tag = (e.target?.tagName || '').toLowerCase();
-    if (tag === 'input' || tag === 'textarea') return;
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
     const k = e.key;
+    // fixed system keys
     switch (k) {
       case '1':
         return this.emit('gameMode', { mode: 'solo' });
@@ -108,43 +130,37 @@ export class InputManager extends Emitter {
         return this.emit('gameMode', { mode: 'arsenal' });
       case '3':
         return this.emit('gameMode', { mode: 'master' });
-      case ' ':
-        e.preventDefault();
-        return e.repeat ? undefined : this.emit('formation', { dir: 1 });
-      case 'ArrowRight':
-        e.preventDefault();
-        return this.emit('swipe', { axis: 'right', dir: { x: 1, y: 0 } });
-      case 'ArrowLeft':
-        e.preventDefault();
-        return this.emit('swipe', { axis: 'left', dir: { x: -1, y: 0 } });
-      case 'ArrowUp':
-        e.preventDefault();
-        return this.emit('swipe', { axis: 'up', dir: { x: 0, y: 1 } });
-      case 'ArrowDown':
-        e.preventDefault();
-        return this.emit('swipe', { axis: 'down', dir: { x: 0, y: -1 } });
+      case '4':
+        return this.emit('gameMode', { mode: 'trial' });
       case 'Tab':
         e.preventDefault();
         return e.repeat ? undefined : this.emit('variant', {});
       default:
     }
-    if (e.repeat) return;
-    switch (k.toLowerCase()) {
-      case 'r':
-        return this.emit('reset', {});
-      case 'c':
-        return this.emit('cinematic', {});
-      case 'f':
-        return this.emit('fullscreen', {});
-      case 'h':
-      case '?':
-        return this.emit('help', {});
-      case 'b':
-        return this.emit('preview', {});
-      case 'i':
-        return this.cycle();
-      default:
+    if (!e.repeat) {
+      switch (k.toLowerCase()) {
+        case 'r':
+          return this.emit('reset', {});
+        case 'f':
+          return this.emit('fullscreen', {});
+        case 'h':
+        case '?':
+          return this.emit('help', {});
+        case 'b':
+          return this.emit('preview', {});
+        case 'i':
+          return this.cycle();
+        case 'g':
+          return this.emit('lab', {});
+        default:
+      }
     }
+    // rebindable keys (Space, arrows, C and any key the player added in the Gesture Lab)
+    const id = `key.${k === ' ' ? 'Space' : k.length === 1 ? k.toLowerCase() : k}`;
+    if (!this.actionMap?.hasTrigger(id)) return;
+    if (k === ' ' || k.startsWith('Arrow')) e.preventDefault();
+    if (e.repeat) return;
+    this.fire(id, ARROWS[k] ? { ...ARROWS[k] } : {});
   }
 
   enableKeys(v = true) {
@@ -324,6 +340,23 @@ export class InputManager extends Emitter {
   /* Frame                                                                */
   /* ------------------------------------------------------------------ */
 
+  /** Grab / release / pinch-start: derived from changes of the stable hand pose. */
+  _poseTriggers(now) {
+    const st = this.state;
+    const pose = st.active && st.primary.present ? st.primary.pose : 'none';
+    const prev = this._lastPose;
+    if (pose === prev) return;
+    this._lastPose = pose;
+    const go = (id) => {
+      if (now - (this._poseAt[id] || 0) < POSE_COOLDOWN_MS) return;
+      this._poseAt[id] = now;
+      this.fire(id, {});
+    };
+    if (prev === 'open' && pose === 'fist') go('cam.grab');
+    else if (prev === 'fist' && pose === 'open') go('cam.release');
+    if (pose === 'pinch') go('cam.pinchStart');
+  }
+
   /** Returns the ControlState of the active input. */
   update(dt, now) {
     switch (this.mode) {
@@ -334,6 +367,7 @@ export class InputManager extends Emitter {
           this.lastHandsAt = now - 200;
         }
         this.state = this.gestures.state;
+        this._poseTriggers(now);
         break;
       case 'mouse':
         this.state = this.mouse.update(dt);

@@ -21,6 +21,7 @@ const REFERENCE = {
       ['Swipe', 'Open-palm swipe changes formation (SOLO: dash).'],
       ['Quick move', 'Fist or point flick: sword dashes (formation follows in a wave).'],
       ['Two hands', 'Right hand leads, left hand places the formation. Hold both palms open for the cinematic formation.'],
+      ['4 · TRIAL', 'Fly through rings and smash blocks. Each shows the move it needs; use any gesture you bound to it.'],
     ],
     keys: true,
   },
@@ -40,6 +41,7 @@ const REFERENCE = {
       ['A / D', 'Rotate wrist (tilt sword and formation).'],
       ['C · Middle-click', 'Cinematic formation.'],
       ['T', 'Twin hands: mirrored second hand for two-hand play.'],
+      ['4 · TRIAL', 'Fly through rings and smash blocks. Each shows the move it needs.'],
     ],
     keys: true,
   },
@@ -53,7 +55,8 @@ const REFERENCE = {
   },
 };
 const KEYS = [
-  ['1 · 2 · 3', 'Switch mode'],
+  ['1 · 2 · 3 · 4', 'Switch mode'],
+  ['G', 'Gesture Lab: rebind gestures, make tasks and courses'],
   ['Tab', 'Next sword'],
   ['R', 'Reset scene'],
   ['I', 'Next input'],
@@ -128,6 +131,13 @@ export class UIManager extends Emitter {
     $('btnFullscreen').addEventListener('click', () => this.toggleFullscreen());
     $('btnPreview').addEventListener('click', () => this.togglePreview());
     $('btnHelp').addEventListener('click', () => this.toggleHelp());
+    $('btnLab').addEventListener('click', () => this.emit('lab', {}));
+    $('titleLab').addEventListener('click', () => this.emit('lab', {}));
+    $('trLab').addEventListener('click', () => this.emit('lab', {}));
+    $('trOverLab').addEventListener('click', () => this.emit('lab', {}));
+    $('trRestart').addEventListener('click', () => this.emit('trialRetry', {}));
+    $('trRetry').addEventListener('click', () => this.emit('trialRetry', {}));
+    $('courseSelect').addEventListener('change', (e) => this.emit('course', { id: e.target.value }));
     $('refClose').addEventListener('click', () => this.toggleHelp(false));
     this.togglePreview(true);
   }
@@ -170,6 +180,73 @@ export class UIManager extends Emitter {
 
   setVeil(dim) {
     this.el.veil.classList.toggle('dim', dim);
+  }
+
+  /* ------------------------------ trial HUD -------------------------- */
+
+  setTrialVisible(v) {
+    $('trialHud').classList.toggle('is-hidden', !v);
+    if (!v) {
+      $('trOver').classList.add('is-hidden');
+      $('trBanner').classList.remove('show');
+    }
+  }
+
+  setCourses(list, selected) {
+    const sel = $('courseSelect');
+    sel.replaceChildren();
+    for (const c of list) {
+      const o = document.createElement('option');
+      o.value = c.id;
+      o.textContent = c.name;
+      sel.appendChild(o);
+    }
+    if (selected) sel.value = selected;
+  }
+
+  setTrial(st) {
+    $('trScore').textContent = String(st.score);
+    $('trCombo').textContent = String(st.combo);
+    $('trBest').textContent = String(st.best);
+    $('trLevelLabel').textContent = st.endless ? 'LEVEL' : 'PROGRESS';
+    $('trLevel').textContent = st.endless ? String(st.level) : st.progress;
+    const pips = $('trShields');
+    let html = '';
+    for (let i = 0; i < st.maxShields; i++) html += `<i class="${i < st.shields ? 'on' : ''}"></i>`;
+    if (pips.innerHTML !== html) pips.innerHTML = html;
+    if ($('courseSelect').value !== st.courseId && st.courseId) $('courseSelect').value = st.courseId;
+
+    const next = $('trNext');
+    if (st.over) next.textContent = '';
+    else if (st.next) {
+      const verb = st.next.type === 'ring' ? 'RING' : 'BLOCK';
+      const how = st.next.hint ? ` · ${st.next.hint}` : '';
+      next.innerHTML = '';
+      const a = document.createElement('b');
+      a.textContent = `NEXT ${verb}: ${st.next.name.toUpperCase()}`;
+      const b = document.createElement('span');
+      b.textContent = how || '';
+      if (st.next.hint === 'not bound') b.className = 'warn';
+      next.append(a, b);
+    } else next.textContent = 'Obstacles incoming…';
+
+    const over = $('trOver');
+    over.classList.toggle('is-hidden', !st.over);
+    if (st.over) {
+      $('trOverTitle').textContent = st.cleared ? 'COURSE CLEARED' : 'TRIAL ENDED';
+      $('trOverStats').textContent = `Score ${st.score}  ·  Best ${st.best}`;
+    }
+  }
+
+  trialResult(text, good) {
+    const el = $('trBanner');
+    el.textContent = text;
+    el.classList.toggle('bad', !good);
+    el.classList.remove('show');
+    void el.offsetWidth; // restart the CSS animation
+    el.classList.add('show');
+    clearTimeout(this._bannerTimer);
+    this._bannerTimer = setTimeout(() => el.classList.remove('show'), 1500);
   }
 
   /* ----------------------------- status ----------------------------- */

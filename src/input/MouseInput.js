@@ -163,6 +163,8 @@ export class MouseInput extends Emitter {
   }
 
   _onKey(e, down) {
+    const tag = (e.target?.tagName || '').toLowerCase();
+    if (down && (tag === 'input' || tag === 'textarea' || tag === 'select')) return; // typing in the Gesture Lab
     if (e.key === 'Shift') {
       if (down && !this.shift) this._startShift();
       else if (!down && this.shift) this._endShift();

@@ -8,9 +8,14 @@ import { CameraManager } from './camera/CameraManager.js';
 import { HandTracker } from './tracking/HandTracker.js';
 import { GestureRecognizer } from './tracking/GestureRecognizer.js';
 import { InputManager } from './input/InputManager.js';
+import { ActionMap } from './input/ActionMap.js';
+import { ObstacleCourse } from './trial/ObstacleCourse.js';
+import { LabScreen } from './ui/LabScreen.js';
 import { UIManager } from './ui/UIManager.js';
 import { lerp } from './utils/MathUtils.js';
 
+// Events forwarded as-is: the demo script's actions and the fixed system keys (R, Tab).
+// Everything the player triggers (gestures, clicks, rebindable keys) arrives as 'act' via the ActionMap.
 const FORWARDED_EVENTS = ['dash', 'swipe', 'spin', 'teleport', 'cinematic', 'summon', 'formation', 'reset', 'variant'];
 
 class App {
@@ -27,6 +32,8 @@ class App {
 
     this.fx = new MagicEffects(this.sm.scene, this.particles, this.sm);
     this.controller = new SwordController(this.sm, this.fx);
+    this.actionMap = new ActionMap();
+    this.controller.actions = this.actionMap;
 
     this.camera = new CameraManager(this.ui.el.camVideo);
     this.tracker = new HandTracker(this.camera);
@@ -37,7 +44,17 @@ class App {
       gestures: this.gestures,
       mouseTarget: this.ui.el.stage,
       getGameMode: () => this.controller.mode,
+      actionMap: this.actionMap,
     });
+    this.course = new ObstacleCourse({
+      scene: this.sm.scene,
+      fx: this.fx,
+      controller: this.controller,
+      sm: this.sm,
+      actionMap: this.actionMap,
+      getInputMode: () => this.input.mode,
+    });
+    this.lab = new LabScreen(this.actionMap, document.getElementById('lab'));
 
     this.started = false;
     this.activated = false;
@@ -51,6 +68,7 @@ class App {
     this.controller.setMode('arsenal', { announce: false }); // atmospheric backdrop for the title screen
     this.ui.setGameMode('arsenal');
     this.ui.setVariant('mixed');
+    this.ui.setCourses(this.actionMap.allCourses(), this.course.courseId);
     this.ui.setCameraStatus('idle');
     this.ui.setInputMode('none', this.input.available);
     this.ui.setTracking('—');
@@ -69,6 +87,32 @@ class App {
     ui.on('gameMode', ({ mode }) => this.setGameMode(mode));
     ui.on('variant', ({ choice }) => controller.setVariantChoice(choice));
     ui.on('reset', () => controller.reset());
+    ui.on('lab', () => this.lab.toggle());
+    ui.on('course', ({ id }) => this.course.start(id));
+    ui.on('trialRetry', () => this.course.restart());
+
+    // ---- Gesture Lab ----
+    this.lab.on('open', () => this.input.enableKeys(false));
+    this.lab.on('close', () => this.input.enableKeys(this.started));
+    this.lab.on('test', ({ action }) => controller.run(action, {}));
+    this.lab.on('testSteps', ({ steps }) => controller.runSteps(steps));
+    this.lab.on('play', async ({ courseId }) => {
+      this.lab.close();
+      if (!this.started) await this.start('mouse');
+      this.course.courseId = courseId;
+      this.setGameMode('trial');
+      this.course.start(courseId);
+    });
+    this.actionMap.on('change', () => this.ui.setCourses(this.actionMap.allCourses(), this.course.courseId));
+
+    // ---- TRIAL mode ----
+    this.course.on('state', (st) => ui.setTrial(st));
+    this.course.on('result', (r) => ui.trialResult(r.text, r.good));
+    input.on('lab', () => this.lab.toggle());
+    input.on('act', ({ action, payload }) => {
+      if (!this.started) return;
+      controller.run(action, payload || {});
+    });
 
     input.on('gameMode', ({ mode }) => this.setGameMode(mode));
     for (const name of FORWARDED_EVENTS) {
@@ -93,12 +137,17 @@ class App {
       this._syncGuide();
     });
 
-    controller.on('action', ({ name }) => ui.flashAction(name));
+    controller.on('action', ({ name }) => {
+      ui.flashAction(name);
+      if (name === 'SCENE RESET' && this.course.active) this.course.restart();
+    });
     controller.on('formation', ({ name }) => ui.setFormation(name));
     controller.on('variant', ({ choice }) => ui.setVariant(choice));
     controller.on('mode', ({ mode }) => {
       ui.setGameMode(mode);
-      ui.setFormation(mode === 'solo' ? '' : controller.formation.type.name);
+      ui.setFormation(mode === 'solo' || mode === 'trial' ? '' : controller.formation.type.name);
+      this.course.setActive(mode === 'trial');
+      ui.setTrialVisible(mode === 'trial');
     });
 
     camera.on('status', ({ status, message }) => ui.setCameraStatus(status, message));
@@ -138,7 +187,7 @@ class App {
   setGameMode(mode) {
     this.controller.setMode(mode);
     this.ui.setGameMode(mode);
-    if (mode !== 'solo') this.ui.setFormation(this.controller.formation.type.name);
+    if (mode !== 'solo' && mode !== 'trial') this.ui.setFormation(this.controller.formation.type.name);
   }
 
   /** Wake the chamber: lift the veil, show the HUD, settle into SOLO. */
@@ -186,6 +235,7 @@ class App {
     if (!this.activated && input.mode === 'camera' && state.active) this.activate();
 
     controller.update(dt, this.time, state);
+    this.course.update(dt, this.time);
     fx.update(dt);
     particles.update(dt);
     sm.update(dt, controller.main.group.position, controller.main.glow);

@@ -11,7 +11,11 @@ export const MODES = {
   solo: { id: 'solo', key: '1', name: 'SOLO', desc: 'One blade follows your hand' },
   arsenal: { id: 'arsenal', key: '2', name: 'ARSENAL', desc: 'A formation of swords floats around you' },
   master: { id: 'master', key: '3', name: 'MASTER', desc: 'Lead blade + formation + every animation' },
+  trial: { id: 'trial', key: '4', name: 'TRIAL', desc: 'Obstacle course: rings and blocks demand a specific move' },
 };
+
+/** SOLO and TRIAL both wield a single lead blade. */
+const soloLike = (mode) => mode === 'solo' || mode === 'trial';
 
 const FORMATION_COUNT = 8;
 const CINEMATIC_DURATION = 5.2;
@@ -46,6 +50,8 @@ export class SwordController extends Emitter {
     for (const s of this.swords) sceneManager.scene.add(s.group);
 
     this.mode = 'solo';
+    this.actions = null; // ActionMap (needed to expand custom tasks)
+    this.firedAt = {}; // action id -> time it last fired
     this.deployed = false;
     this.echoUntil = 0;
     this._wasDeployed = false;
@@ -91,7 +97,7 @@ export class SwordController extends Emitter {
     this.mode = mode;
     if (changed) this.echoUntil = 0; // a SOLO blade-echo never leaks into another mode
     if (mode === 'arsenal') this.deployed = true;
-    else if (mode === 'solo') this.deployed = false;
+    else if (soloLike(mode)) this.deployed = false;
     else if (changed) this.deployed = false;
     if (changed) {
       this.fx.shockwave(this.main.group.position, this.main.color, 3, 0.7);
@@ -162,8 +168,34 @@ export class SwordController extends Emitter {
     this.emit('formation', { name: this.formation.type.name });
   }
 
+  /** Run an action id coming from the ActionMap: a base action or a custom task. */
+  run(actionId, payload = {}) {
+    if (!actionId) return;
+    if (actionId.startsWith('task:')) {
+      const task = this.actions?.getTask(actionId);
+      if (!task) return;
+      this._markFired(actionId);
+      this.emit('action', { name: `TASK · ${task.name.toUpperCase()}` });
+      for (const st of task.steps) this.anim.schedule(st.delay || 0, () => this.trigger(st.action, payload));
+      return;
+    }
+    this.trigger(actionId, payload);
+  }
+
+  /** Play an unsaved list of steps (used by the Gesture Lab's "Try these steps"). */
+  runSteps(steps, payload = {}) {
+    this.emit('action', { name: 'TASK · PREVIEW' });
+    for (const st of steps) this.anim.schedule(st.delay || 0, () => this.trigger(st.action, payload));
+  }
+
+  _markFired(id) {
+    this.firedAt[id] = this.time;
+    this.emit('fired', { action: id, time: this.time });
+  }
+
   /** Discrete events from any input source. */
   trigger(name, payload = {}) {
+    this._markFired(name);
     switch (name) {
       case 'dash':
         return this._dash(payload);
@@ -179,6 +211,9 @@ export class SwordController extends Emitter {
         return this._toggleSummon();
       case 'formation':
         return this._cycleFormation(payload.dir || 1);
+      case 'expand':
+      case 'collapse':
+        return this.trigger('spread', { delta: name === 'expand' ? 0.4 : -0.4 });
       case 'spread':
         this.formation.setSpread(this.formation.spreadTarget + (payload.delta || 0));
         this.emit('action', { name: this.formation.spreadTarget > 0.5 ? 'FORMATION · EXPAND' : 'FORMATION · COLLAPSE' });
@@ -222,7 +257,8 @@ export class SwordController extends Emitter {
 
   _swipe(payload) {
     if (this.cinematic) return;
-    if (this.mode === 'solo' && !this._effectiveDeployed()) {
+    if (soloLike(this.mode) && !this._effectiveDeployed()) {
+      this._markFired('dash'); // a swipe with one blade *is* a dash
       this._dash({ dir: payload.dir });
       this.emit('action', { name: 'SWIPE · DASH' });
       return;
@@ -240,7 +276,7 @@ export class SwordController extends Emitter {
     if (this.cinematic) return;
     if (!this._effectiveDeployed()) {
       // Space/summon when nothing is deployed summons first.
-      if (this.mode === 'solo') this.echoUntil = this.time + 4.5;
+      if (soloLike(this.mode)) this.echoUntil = this.time + 4.5;
       else this.deployed = true;
       this.emit('action', { name: 'SUMMON' });
       return;
@@ -258,7 +294,7 @@ export class SwordController extends Emitter {
         this.anim.schedule(0.4, () => (s.glowTarget = 0.45));
       });
     });
-    if (this.mode === 'solo' && this.echoUntil > this.time) this.echoUntil = Math.max(this.echoUntil, this.time + 3);
+    if (soloLike(this.mode) && this.echoUntil > this.time) this.echoUntil = Math.max(this.echoUntil, this.time + 3);
     this.emit('action', { name: `${fromSwipe ? 'SWIPE · ' : ''}FORMATION · ${type.name.toUpperCase()}` });
     this.emit('formation', { name: type.name });
   }
@@ -289,8 +325,8 @@ export class SwordController extends Emitter {
 
   _toggleSummon() {
     if (this.cinematic) return;
-    if (this.mode === 'solo') {
-      // SOLO wields one blade; summoning conjures a brief echo of the arsenal.
+    if (soloLike(this.mode)) {
+      // SOLO / TRIAL wield one blade; summoning conjures a brief echo of the arsenal.
       if (this.time < this.echoUntil) this.echoUntil = 0;
       else this.echoUntil = this.time + 4.5;
       this.emit('action', { name: this.time < this.echoUntil ? 'BLADE ECHO' : 'ECHO FADES' });
@@ -397,7 +433,7 @@ export class SwordController extends Emitter {
     }
 
     // Formation spread / rotation
-    if (this.mode !== 'solo' || this._effectiveDeployed()) {
+    if (!soloLike(this.mode) || this._effectiveDeployed()) {
       const hh = this.mode === 'master' && ctl.twoHands ? ctl.secondary : ctl.primary;
       if (ctl.active && hh.present) {
         if (hh.pose === 'fist') this.formation.setSpread(0.02);
@@ -516,7 +552,7 @@ export class SwordController extends Emitter {
       groups.push({ center: this.sm.worldFromNDC(ctl.secondary.pos.x, ctl.secondary.pos.y, ctl.secondary.depth, new THREE.Vector3()), indices: idx.filter((i) => i % 2 === 1), scale: 0.72 });
     } else {
       const c = this._formationCenter(new THREE.Vector3());
-      groups.push({ center: c, indices: idx, scale: this.mode === 'solo' ? 0.8 : this.mode === 'master' ? 1.05 : 1 });
+      groups.push({ center: c, indices: idx, scale: soloLike(this.mode) ? 0.8 : this.mode === 'master' ? 1.05 : 1 });
     }
 
     for (const g of groups) {
