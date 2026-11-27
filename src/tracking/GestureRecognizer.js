@@ -7,7 +7,7 @@ import { createControlState, resetHandState, POSE_LABELS } from '../input/Contro
  *   1. a ControlState (position, depth, roll, pose, spread, pinch, two-hand data)
  *   2. discrete gesture events with cooldowns:
  *        'swipe' {dir, axis}      fast move with an open palm
- *        'dash'  {dir, axis}      fast move with any other pose
+ *        'dash'  {dir, axis}      fast flick while POINTING (index finger only)
  *        'spin'  {dir}            fast wrist rotation
  *        'pinchStart' / 'teleport' {pos}   pinch and release
  *        'cinematic'              both open palms held together
@@ -85,6 +85,8 @@ export class GestureRecognizer extends Emitter {
     this.twoOpenSince = 0;
     this.twoOpenFired = false;
     this.twoOpenLost = 0;
+    /** Twin-dagger mode: BOTH hands emit dash / spin / teleport, tagged with the hand's side. */
+    this.twin = false;
   }
 
   reset() {
@@ -134,8 +136,8 @@ export class GestureRecognizer extends Emitter {
     const secondarySide = 'Left';
 
     const st = this.state;
-    this._write(st.primary, primaryAn, features[primarySide] || this._lastFeatures?.[primarySide]);
-    this._write(st.secondary, secondaryAn, features[secondarySide] || this._lastFeatures?.[secondarySide]);
+    this._write(st.primary, primaryAn, features[primarySide] || this._lastFeatures?.[primarySide], primarySide);
+    this._write(st.secondary, secondaryAn, features[secondarySide] || this._lastFeatures?.[secondarySide], secondarySide);
     this._lastFeatures = { ...(this._lastFeatures || {}), ...features };
 
     st.active = st.primary.present;
@@ -190,7 +192,8 @@ export class GestureRecognizer extends Emitter {
     if (pinching) raw = 'pinch';
     else if (extCount >= 3) raw = 'open';
     else if (extCount === 0) raw = 'fist';
-    else if (extCount === 1 && ext[0] > 0.5) raw = 'point';
+    else if (extCount === 1 && ext[0] > 0.5) raw = 'point'; // index finger only
+    else if (extCount === 2 && ext[0] > 0.5 && ext[1] > 0.5) raw = 'two'; // index + middle open
     else if (extCount === 1) raw = 'fist';
     else raw = 'neutral';
 
@@ -257,9 +260,9 @@ export class GestureRecognizer extends Emitter {
     an.rollHistory.push({ t: now, a: an.rollUnwrapped });
     while (an.rollHistory.length && now - an.rollHistory[0].t > CFG.spinWindowMs) an.rollHistory.shift();
 
-    if (warmed && hand.side === (this.analyzers.Right.present ? 'Right' : 'Left')) {
-      this._detectSwipe(an, now);
-      this._detectSpin(an, now);
+    if (warmed && (this.twin || hand.side === (this.analyzers.Right.present ? 'Right' : 'Left'))) {
+      this._detectSwipe(an, now, hand.side);
+      this._detectSpin(an, now, hand.side);
     }
 
     return { x, y, depth, roll: an.rollUnwrapped, pinch: pinchAmount, score: hand.score };
@@ -267,15 +270,16 @@ export class GestureRecognizer extends Emitter {
 
   _onPoseChange(an, side, prev, now) {
     const primarySide = this.analyzers.Right.present ? 'Right' : 'Left';
-    if (side === primarySide) {
+    if (this.twin || side === primarySide) {
+      const tw = this.twin ? side : '';
       if (an.pose === 'pinch') {
         an.pinchSince = now;
-        this.emit('pinchStart', { pos: an.prev ? { x: an.prev.x, y: an.prev.y } : { x: 0, y: 0 } });
+        this.emit('pinchStart', { pos: an.prev ? { x: an.prev.x, y: an.prev.y } : { x: 0, y: 0 }, side });
       } else if (prev === 'pinch') {
         const held = now - an.pinchSince;
-        if (held >= CFG.pinchMinHoldMs && now > this.cooldowns.teleport && now - an.firstSeen > CFG.warmupMs) {
-          this.cooldowns.teleport = now + CFG.teleportCooldownMs;
-          this.emit('teleport', { pos: an.prev ? { x: an.prev.x, y: an.prev.y } : { x: 0, y: 0 } });
+        if (held >= CFG.pinchMinHoldMs && now > (this.cooldowns['teleport' + tw] || 0) && now - an.firstSeen > CFG.warmupMs) {
+          this.cooldowns['teleport' + tw] = now + CFG.teleportCooldownMs;
+          this.emit('teleport', { pos: an.prev ? { x: an.prev.x, y: an.prev.y } : { x: 0, y: 0 }, side });
         } else {
           this.emit('pinchCancel', {});
         }
@@ -284,7 +288,8 @@ export class GestureRecognizer extends Emitter {
     this.emit('pose', { hand: side, pose: an.pose, prev });
   }
 
-  _detectSwipe(an, now) {
+  _detectSwipe(an, now, side) {
+    const tw = this.twin ? side : '';
     if (an.pose === 'pinch' || an.history.length < 4) return;
     const first = an.history[0];
     const last = an.history[an.history.length - 1];
@@ -296,24 +301,28 @@ export class GestureRecognizer extends Emitter {
     const speed = dist / dtw;
     if (dist < CFG.swipeMinDist || speed < CFG.swipeMinSpeed) return;
 
+    // Open palm sweeps = swipe, a pointing finger flicks = dash; other poses never fire either.
     const isSwipe = an.pose === 'open';
+    if (!isSwipe && an.pose !== 'point') return;
     const key = isSwipe ? 'swipe' : 'dash';
-    if (now < this.cooldowns[key]) return;
-    this.cooldowns[key] = now + (isSwipe ? CFG.swipeCooldownMs : CFG.dashCooldownMs);
+    if (now < (this.cooldowns[key + tw] || 0)) return;
+    this.cooldowns[key + tw] = now + (isSwipe ? CFG.swipeCooldownMs : CFG.dashCooldownMs);
     // Don't double-fire swipe + dash for the same motion.
-    this.cooldowns[isSwipe ? 'dash' : 'swipe'] = Math.max(this.cooldowns[isSwipe ? 'dash' : 'swipe'], now + 400);
+    const other = (isSwipe ? 'dash' : 'swipe') + tw;
+    this.cooldowns[other] = Math.max(this.cooldowns[other] || 0, now + 400);
 
     const axis = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : dy > 0 ? 'up' : 'down';
-    this.emit(key, { dir: { x: dx / dist, y: dy / dist }, axis, speed });
+    this.emit(key, { dir: { x: dx / dist, y: dy / dist }, axis, speed, side });
     an.history.length = 0;
   }
 
-  _detectSpin(an, now) {
-    if (an.pose === 'pinch' || an.rollHistory.length < 4 || now < this.cooldowns.spin) return;
+  _detectSpin(an, now, side) {
+    const tw = this.twin ? side : '';
+    if (an.pose === 'pinch' || an.rollHistory.length < 4 || now < (this.cooldowns['spin' + tw] || 0)) return;
     const delta = an.rollHistory[an.rollHistory.length - 1].a - an.rollHistory[0].a;
     if (Math.abs(delta) < CFG.spinMinAngle) return;
-    this.cooldowns.spin = now + CFG.spinCooldownMs;
-    this.emit('spin', { dir: Math.sign(delta) });
+    this.cooldowns['spin' + tw] = now + CFG.spinCooldownMs;
+    this.emit('spin', { dir: Math.sign(delta), side });
     an.rollHistory.length = 0;
   }
 
@@ -339,7 +348,8 @@ export class GestureRecognizer extends Emitter {
     }
   }
 
-  _write(out, an, f) {
+  _write(out, an, f, side) {
+    out.side = side;
     if (!an || !f) {
       if (out.present) resetHandState(out);
       return;

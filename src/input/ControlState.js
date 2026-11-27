@@ -6,10 +6,11 @@
  *
  * Positions are in NDC-like units: x,y in [-1, 1], +y is UP.
  * depth: 0 = far from the viewer, 1 = close.
- * pose: 'open' | 'fist' | 'pinch' | 'point' | 'neutral' | 'none'
+ * pose: 'open' | 'fist' | 'pinch' | 'point' (index only) | 'two' (index + middle) | 'neutral' | 'none'
  */
-export function createHandState() {
+export function createHandState(side = 'Right') {
   return {
+    side, // 'Left' | 'Right': which physical hand this is (the twin daggers use it)
     present: false,
     pos: { x: 0, y: 0 },
     vel: { x: 0, y: 0 },
@@ -27,8 +28,9 @@ export function createControlState() {
   return {
     source: 'none', // 'camera' | 'mouse' | 'demo' | 'none'
     active: false, // any hand/cursor currently driving the scene
-    primary: createHandState(),
-    secondary: createHandState(),
+    primary: createHandState('Right'),
+    secondary: createHandState('Left'),
+    buttons: { left: false, right: false }, // mouse buttons held (the twin daggers use them to pick a dagger)
     twoHands: false,
     handsDistance: 0, // NDC distance between the two palms
     handsCenter: { x: 0, y: 0 },
@@ -51,6 +53,7 @@ export const POSE_LABELS = {
   fist: 'CLOSED FIST',
   pinch: 'PINCH',
   point: 'POINTING',
+  two: 'TWO FINGERS',
   neutral: 'TRACKING',
   none: 'NO HAND',
 };

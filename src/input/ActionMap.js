@@ -21,13 +21,14 @@ export const ACTIONS = [
   { id: 'expand', name: 'Expand formation', desc: 'Spread the swords out' },
   { id: 'collapse', name: 'Collapse formation', desc: 'Pull the swords in' },
   { id: 'cinematic', name: 'Cinematic', desc: 'The 5-second crown-of-blades sequence' },
-  { id: 'variant', name: 'Next sword', desc: 'Cycle Nightfang / Wraith / Requiem / Mixed' },
+  { id: 'variant', name: 'Next weapon', desc: 'Cycle Katana / Greatsword / Left dagger / Right dagger / Twin daggers' },
 ];
 
 /** Every physical trigger the app can detect. `short` is the label used in hints. */
 export const TRIGGERS = [
   // camera (hand) gestures
-  { id: 'cam.flick', group: 'camera', name: 'Quick flick', short: 'Flick', desc: 'A fast fist / pointing flick', def: 'dash' },
+  { id: 'cam.flick', group: 'camera', name: 'Point & flick', short: 'Point-flick', desc: 'Point with one finger (index only) and flick fast', def: 'dash' },
+  { id: 'cam.twoFingers', group: 'camera', name: 'Two fingers open', short: 'Two fingers', desc: 'Hold up index + middle finger, the others closed', def: null },
   { id: 'cam.wristSpin', group: 'camera', name: 'Fast wrist twist', short: 'Wrist twist', desc: 'Rotate the wrist quickly', def: 'spin' },
   { id: 'cam.pinchRelease', group: 'camera', name: 'Pinch, then release', short: 'Pinch-release', desc: 'Pinch, move, open the fingers', def: 'teleport' },
   { id: 'cam.swipe', group: 'camera', name: 'Open-palm swipe', short: 'Palm swipe', desc: 'Sweep an open hand sideways', def: 'swipe' },
@@ -51,7 +52,7 @@ export const TRIGGERS = [
 ];
 
 /** Keys the app itself needs; they cannot be rebound. */
-const RESERVED_KEYS = new Set(['1', '2', '3', '4', 'r', 'i', 'f', 'h', 'b', 'g', 'q', 'e', 'a', 'd', 't', 'tab', 'escape', 'shift', 'control', 'alt', 'meta', 'capslock', 'dead']);
+const RESERVED_KEYS = new Set(['1', '2', '3', '4', '5', '6', '7', '8', '9', 'r', 'i', 'f', 'h', 'b', 'g', 'q', 'e', 'a', 'd', 't', 'tab', 'escape', 'shift', 'control', 'alt', 'meta', 'capslock', 'dead']);
 
 const BUILTIN_TASKS = [
   { id: 'task:whirlwind', name: 'Whirlwind', builtin: true, gauntlet: true, steps: [{ action: 'spin', delay: 0 }, { action: 'dash', delay: 0.5 }] },

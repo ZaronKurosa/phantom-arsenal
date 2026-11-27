@@ -8,6 +8,7 @@ import { CameraManager } from './camera/CameraManager.js';
 import { HandTracker } from './tracking/HandTracker.js';
 import { GestureRecognizer } from './tracking/GestureRecognizer.js';
 import { InputManager } from './input/InputManager.js';
+import { LOADOUTS } from './weapons/WeaponRegistry.js';
 import { ActionMap } from './input/ActionMap.js';
 import { ObstacleCourse } from './trial/ObstacleCourse.js';
 import { LabScreen } from './ui/LabScreen.js';
@@ -67,7 +68,7 @@ class App {
     this._wire();
     this.controller.setMode('arsenal', { announce: false }); // atmospheric backdrop for the title screen
     this.ui.setGameMode('arsenal');
-    this.ui.setVariant('mixed');
+    this.ui.setWeapon(this.controller.weapons.loadoutId);
     this.ui.setCourses(this.actionMap.allCourses(), this.course.courseId);
     this.ui.setCameraStatus('idle');
     this.ui.setInputMode('none', this.input.available);
@@ -85,7 +86,7 @@ class App {
     ui.on('start', ({ input: mode }) => this.start(mode));
     ui.on('input', ({ mode }) => this.selectInput(mode));
     ui.on('gameMode', ({ mode }) => this.setGameMode(mode));
-    ui.on('variant', ({ choice }) => controller.setVariantChoice(choice));
+    ui.on('weapon', ({ id }) => controller.selectWeapon(id));
     ui.on('reset', () => controller.reset());
     ui.on('lab', () => this.lab.toggle());
     ui.on('course', ({ id }) => this.course.start(id));
@@ -115,6 +116,7 @@ class App {
     });
 
     input.on('gameMode', ({ mode }) => this.setGameMode(mode));
+    input.on('weapon', ({ index }) => this.started && controller.selectWeapon(LOADOUTS[index]?.id));
     for (const name of FORWARDED_EVENTS) {
       input.on(name, (payload) => {
         if (!this.started) return;
@@ -142,7 +144,13 @@ class App {
       if (name === 'SCENE RESET' && this.course.active) this.course.restart();
     });
     controller.on('formation', ({ name }) => ui.setFormation(name));
-    controller.on('variant', ({ choice }) => ui.setVariant(choice));
+    controller.on('weapon', ({ phase, id, loadout }) => {
+      // the highlighted card follows the weapon being summoned; the toast names it
+      ui.setWeapon(controller.weapons.switcher.pending?.id ?? id, phase === 'ready' ? 'idle' : phase);
+      if (phase === 'entering') ui.flashAction(loadout.name.toUpperCase());
+      this.input.mouse.pairMode = loadout.twin; // twin daggers: LMB / RMB pick the dagger
+      this.input.gestures.twin = loadout.twin; // twin daggers: both hands emit actions
+    });
     controller.on('mode', ({ mode }) => {
       ui.setGameMode(mode);
       ui.setFormation(mode === 'solo' || mode === 'trial' ? '' : controller.formation.type.name);
@@ -198,7 +206,8 @@ class App {
     this.ui.setVeil(false);
     this.ui.showGuide(false);
     if (this.input.mode !== 'demo') this.setGameMode('solo');
-    this.ui.setVariant(this.controller.variantChoice);
+    // the chamber wakes: the equipped weapon plays its entry animation (the katana's Purple Awakening)
+    this.controller.weapons.reenter();
   }
 
   _syncGuide() {

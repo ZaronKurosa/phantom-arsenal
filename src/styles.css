@@ -717,8 +717,28 @@ kbd {
 }
 .sword-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 6px;
+}
+.sword-card {
+  grid-column: span 2;
+}
+.sword-card:nth-child(n + 4) {
+  grid-column: span 3;
+}
+.sword-card kbd {
+  font-family: var(--mono);
+  font-size: 0.46rem;
+  opacity: 0.55;
+  margin-top: -3px;
+}
+.sword-card.busy {
+  animation: weaponPulse 1.1s ease-in-out infinite;
+}
+@keyframes weaponPulse {
+  50% {
+    box-shadow: 0 0 14px rgba(154, 92, 255, 0.55) inset, 0 0 12px rgba(154, 92, 255, 0.35);
+  }
 }
 .sword-card {
   background: none;
@@ -733,6 +753,9 @@ kbd {
 }
 .sword-card svg {
   width: 100%;
+  height: 54px;
+}
+.sword-card:last-child svg {
   height: 54px;
 }
 .sword-card span {

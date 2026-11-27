@@ -41,6 +41,8 @@ export class LightingManager {
     scene.add(this.floorGlow);
 
     this._flash = 0;
+    this._boost = 0;
+    this._boostTarget = 0;
     this._followBase = 34;
     this._keyBase = 260;
   }
@@ -48,6 +50,11 @@ export class LightingManager {
   /** Flash the chamber briefly (value ~ 0..1). */
   pulse(amount = 1) {
     this._flash = Math.max(this._flash, amount);
+  }
+
+  /** Extra violet energy while a weapon's entry animation plays (0..1). */
+  setBoost(v) {
+    this._boostTarget = v;
   }
 
   setShadows(enabled) {
@@ -60,6 +67,7 @@ export class LightingManager {
 
   update(dt, mainPos, glow = 0.5) {
     this._flash = damp(this._flash, 0, 4.5, dt);
+    this._boost = damp(this._boost, this._boostTarget, 5, dt);
     if (mainPos) {
       this.follow.position.lerp(mainPos, 1 - Math.exp(-10 * dt));
       this.follow.position.z += 0.8;
@@ -67,8 +75,8 @@ export class LightingManager {
       this.floorGlow.position.z = mainPos.z;
       this.key.target.position.x += (mainPos.x * 0.4 - this.key.target.position.x) * Math.min(1, dt * 3);
     }
-    this.follow.intensity = this._followBase * (0.7 + glow * 0.8) + this._flash * 90;
-    this.back.intensity = 160 + this._flash * 220;
+    this.follow.intensity = this._followBase * (0.7 + glow * 0.8) + this._flash * 90 + this._boost * 70;
+    this.back.intensity = 160 + this._flash * 220 + this._boost * 140;
     this.key.intensity = this._keyBase * (1 + this._flash * 0.6);
   }
 }

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { instantiate, variantMeta } from './SwordGeometry.js';
+import { createWeaponModel, disposeWeaponModel, weaponMeta } from '../weapons/WeaponRegistry.js';
+import { setWeaponViewport } from '../weapons/WeaponKit.js';
 import { smoothDampVec3 } from '../utils/Smoothing.js';
 import { TAU, clamp, damp, easeOutBack, rand } from '../utils/MathUtils.js';
 
@@ -63,10 +64,15 @@ const _e = new THREE.Euler();
 let UID = 0;
 
 export class Sword {
-  constructor(variantId = 'nightfang', { role = 'formation', scale = 1 } = {}) {
+  /**
+   * @param {string} weaponId  key of WEAPONS (katana, greatsword, dagger-left, dagger-right)
+   * @param {{ role?: 'main'|'partner'|'formation', scale?: number }} opts
+   *   main / partner carry the full model (katana with sheath + awakening); formation blades are lite.
+   */
+  constructor(weaponId = 'katana', { role = 'formation', scale = 1 } = {}) {
     this.id = ++UID;
     this.role = role;
-    this.variantId = variantId;
+    this.weaponId = weaponId;
     this.group = new THREE.Group();
     this.group.name = 'sword-' + this.id;
 
@@ -108,13 +114,14 @@ export class Sword {
     this.glowParts = null;
     this.motes = null;
     this.moteMat = null;
-    this._buildModel(variantId);
+    this._buildModel(weaponId);
     this.group.visible = false;
     this.group.scale.setScalar(1e-4);
   }
 
   static setViewport(heightPx, fovDeg, pixelRatio = 1) {
     MOTE_SCALE.value = (heightPx * pixelRatio) / (2 * Math.tan(THREE.MathUtils.degToRad(fovDeg) / 2));
+    setWeaponViewport(heightPx, fovDeg, pixelRatio);
   }
   static tick(time) {
     MOTE_TIME.value = time;
@@ -123,18 +130,16 @@ export class Sword {
   _buildModel(id) {
     if (this.model) {
       this.group.remove(this.model);
-      this._disposeGlow();
+      disposeWeaponModel(this.model);
     }
-    this.variantId = id;
-    this.model = instantiate(id);
+    this.weaponId = id;
+    const meta = weaponMeta(id);
+    this.model = createWeaponModel(id, { lite: this.role === 'formation' });
     this.glowParts = this.model.userData.glow;
     this.group.add(this.model);
-
-    const meta = variantMeta(id);
-    this.color = new THREE.Color(meta.glow);
-    if (this.glowParts.core) {
-      this.glowParts.core.material.emissive.copy(this.color);
-    }
+    this.baseScale = this.role === 'formation' ? 0.9 * meta.formationScale : meta.leadScale;
+    this.color = new THREE.Color(this.model.userData.color ?? meta.color);
+    if (this.glowParts.core) this.glowParts.core.material.emissive.copy(this.color);
     if (this.glowParts.halo) this.glowParts.halo.material.color.copy(this.color);
     if (this.glowParts.rune) this.glowParts.rune.material.color.copy(this.color).lerp(new THREE.Color(0xffffff), 0.35);
 
@@ -163,9 +168,11 @@ export class Sword {
     this.tipY = this.model.userData.tipY;
   }
 
-  setVariant(id) {
-    if (id === this.variantId) return;
+  /** Swap the weapon model (the caller makes sure the sword is hidden while it happens). */
+  setWeapon(id) {
+    if (id === this.weaponId) return;
     this._buildModel(id);
+    this.snapOrientation();
   }
 
   /* ---------------- orientation helpers ---------------- */
@@ -249,26 +256,21 @@ export class Sword {
     const gp = this.glowParts;
     if (gp.core) gp.core.material.emissiveIntensity = Math.min(3.4, 1.3 + 1.1 * g + 0.4 * pulse);
     if (gp.rune) gp.rune.material.opacity = clamp(0.5 + 0.3 * g + 0.15 * pulse, 0, 1);
-    if (gp.halo) {
-      gp.halo.material.opacity = clamp(0.18 + 0.16 * g + 0.08 * pulse, 0, 0.5);
-      gp.halo.scale.setScalar(0.55 + 0.16 * g);
-    }
+    // (the model's big halo sprite is intentionally not drawn: under bloom it washed the blade out)
+    if (gp.halo) gp.halo.visible = false;
     this.moteMat.uniforms.uAlpha.value = 0.55 + 0.35 * clamp(g, 0, 1);
+
+    // weapon-specific per-frame behaviour (katana awakening, energy scroll, reveal uniforms)
+    this.model.userData.tick?.(dt, time, this);
   }
 
   floatWeightClamped() {
     return 0.35 + 0.65 * clamp(this.floatWeight, 0, 1);
   }
 
-  _disposeGlow() {
-    const gp = this.glowParts;
-    if (!gp) return;
-    for (const k of ['rune', 'core', 'halo']) gp[k]?.material?.dispose();
-  }
-
   dispose() {
     this.group.removeFromParent();
-    this._disposeGlow();
+    disposeWeaponModel(this.model);
     this.moteMat?.dispose();
   }
 }

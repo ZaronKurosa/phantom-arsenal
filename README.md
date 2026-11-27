@@ -47,7 +47,7 @@ A separate full screen with three tabs:
 2. **Tasks**: build your own moves as a chain of actions with delays (up to 6 steps), e.g. Teleport → Dash +0.4 s → Spin +0.8 s. Three built-ins (Whirlwind, Blink Strike, Triple Cut) can be copied and edited. A task can be bound to any gesture/key and can be demanded by obstacles in TRIAL.
 3. **Trial courses**: build courses obstacle by obstacle (ring/block, required action or task, lane, height, gap), then Save & play.
 
-Fixed keys that cannot be rebound: 1-4, R, Tab, F, H, B, I, G, Q, E, A, D, T, Shift, Esc.
+Fixed keys that cannot be rebound: 1-9, R, Tab, F, H, B, I, G, Q, E, A, D, T, Shift, Esc.
 
 ## Camera gestures
 
@@ -60,7 +60,8 @@ Fixed keys that cannot be rebound: 1-4, R, Tab, F, H, B, I, G, Q, E, A, D, T, Sh
 | Open palm (from nothing) | Summon formation |
 | Spread / close fingers | Expand / collapse formation |
 | Swipe | Next formation (Halo, Crescent Fan, Orbit, Wings, Helix) |
-| Quick flick | Dash |
+| Point with one finger + flick | Dash |
+| Two fingers open (index + middle) | Own gesture, unbound by default; bind it in the Gesture Lab |
 | Wrist spin | Spin blades |
 | Both open palms held up for ~0.5 s | Cinematic sequence |
 
@@ -82,14 +83,24 @@ Fixed keys that cannot be rebound: 1-4, R, Tab, F, H, B, I, G, Q, E, A, D, T, Sh
 | 1 / 2 / 3 / 4 | SOLO / ARSENAL / MASTER / TRIAL |
 | Space | Cycle formation (rebindable) |
 | ← → ↑ ↓ | Swipe |
-| Tab | Next sword variant |
+| 5 / 6 / 7 / 8 / 9 | Katana / Greatsword / Left Void Dagger / Right Void Dagger / Twin Void Daggers |
+| Tab | Next weapon |
 | R | Reset |
 | C | Cinematic (rebindable) |
 | G | Gesture Lab |
 | B / I | Toggle camera preview / cycle input |
 | F / H | Fullscreen / help |
 
-Sword variants: **Nightfang** (broadsword), **Crescent Wraith** (curved reaper blade), **Requiem** (greatsword). All are procedural meshes: black metal blade, silver edges, gothic guard, violet rune glow, core, orbiting motes.
+## Weapons
+
+Four weapons, each its own procedural model and entry animation (switch with 5-9, Tab, or the ARMORY panel). Choosing one dismisses the current weapon, then plays the new weapon's entry exactly once.
+
+- **Gothic Katana (5)**: black metallic sheath and handle, silver engravings, violet runes, curved blade, purple aura. Selecting it plays the full *Purple Awakening*: 1 Summoning, 2 Rune Awakening, 3 Unsheathing (curved reveal + violet flash), 4 Sheath Dissolution (thousands of particles spiral, then disperse), 5 Final Presentation (idle float, embers, smooth hand-over to your hand).
+- **Gothic Greatsword (6)**: large black and silver blade, horned guard, central violet crystal, energy running down the fuller. Rises from the floor with an impact shockwave.
+- **Left / Right Void Dagger (7 / 8)**: two *separate* weapons (own model, materials and controller), mirrored hooked blades. Each whirls in from its own side.
+- **Twin Void Daggers (9)**: both daggers at once. **Camera:** left hand wields the left dagger and right hand the right one, independently and at the same time; if both move together they sync (glow + arc between them). **Mouse:** no button = mirrored pair, hold left button = right dagger only, hold right button = left dagger only, both = both. Left click = right dagger dashes, right click = left dagger spins.
+
+All of it is procedural (no downloaded assets).
 
 ## Architecture
 
@@ -101,7 +112,8 @@ src/
   input/               InputManager, MouseInput, DemoDirector, ControlState, ActionMap (gesture→action bindings, tasks, courses)
   trial/               ObstacleCourse (TRIAL mode: rings, blocks, judging, scoring)
   scene/               SceneManager (chamber, bloom), LightingManager
-  swords/              SwordGeometry, Sword, SwordFormation, SwordAnimations, SwordController
+  swords/              Sword, SwordFormation, SwordAnimations, SwordController
+  weapons/             WeaponRegistry, WeaponManager, WeaponSwitcher, WeaponAnimations, Katana, KatanaAwakening, Greatsword, VoidDagger, TwinDaggerController, WeaponKit, WeaponReveal
   effects/             ParticleSystem (pooled), MagicEffects
   ui/                  UIManager (HUD, panels, toasts), LabScreen (Gesture Lab)
   utils/               MathUtils, Smoothing, Emitter
@@ -112,6 +124,8 @@ Camera, mouse and demo all produce the same input-agnostic `ControlState`, so th
 ## Honest limitations
 
 - Tested: all mouse/keyboard/demo paths, TRIAL judging (ring pass/wrong/miss, block smash/hit/dodge, game over, retry), Gesture Lab rebinding, custom tasks, custom keys and custom courses (49 browser checks), mode and input switching, camera failure fallbacks, resizing, and the camera pipeline (fake webcam → WASM + model load → detection loop) in headless Chromium.
+- Weapon system (headless Chromium, software GL): old swords fully removed (no references remain); all four models build, register and render; katana awakening plays through every phase to hand-over; greatsword and dagger entries play; switching with 5-9 / Tab (including rapid and mid-animation switches) never shows two weapon models at once and never replays an entry from tracking updates; twin daggers follow their own hand/button independently (synthetic two-hand input, 14 checks); mouse pair scheme (no button / LMB / RMB) verified; no console errors.
+- **Not yet verified:** twin-dagger control with real hands (the left/right hand assignment comes from MediaPipe's handedness label, which can swap with mirrored webcams; if the daggers appear on the wrong hands, flip it in `HandTracker`), and the katana awakening's look and frame rate on a real GPU (only measured on a software renderer).
 - **Not verified with real hands.** The gesture thresholds (`src/tracking/GestureRecognizer.js`, `CFG`) were checked against synthetic hand skeletons only. Expect to tune them for your camera, lighting and distance.
 - The new hand gestures (grab / release / pinch start) are derived from pose changes and were tested with synthetic poses only, like the rest of the camera gestures.
 - Frame rate was measured on a software renderer (~20 FPS). On a real GPU it should be much higher; the app lowers quality automatically if FPS stays under ~34.

@@ -38,6 +38,10 @@ export class MouseInput extends Emitter {
     this.shift = false;
     this.shiftSince = 0;
     this.twin = false;
+    this.pairMode = false; // twin Void Daggers equipped: LMB holds the right dagger, RMB the left one
+    this.rightDown = false;
+    this.rightDownAt = 0;
+    this.rightDownPos = { x: 0, y: 0 };
     this.hasMoved = false;
 
     this._h = {
@@ -84,6 +88,7 @@ export class MouseInput extends Emitter {
   _releaseAll() {
     this.keys.clear();
     this.leftDown = false;
+    this.rightDown = false;
     if (this.shift) this._endShift();
   }
 
@@ -115,7 +120,12 @@ export class MouseInput extends Emitter {
       this.downPos = { x: e.clientX, y: e.clientY };
     } else if (e.button === 2) {
       e.preventDefault();
-      this.emit('spin', { dir: Math.random() < 0.5 ? 1 : -1 });
+      if (this.pairMode) {
+        // twin daggers: hold = grab the LEFT dagger, a quick tap = its action (the right-click binding)
+        this.rightDown = true;
+        this.rightDownAt = now;
+        this.rightDownPos = { x: e.clientX, y: e.clientY };
+      } else this.emit('spin', { dir: Math.random() < 0.5 ? 1 : -1 });
     } else if (e.button === 1) {
       e.preventDefault();
       this.emit('cinematic', {});
@@ -123,6 +133,13 @@ export class MouseInput extends Emitter {
   }
 
   _onUp(e) {
+    if (e.button === 2 && this.rightDown) {
+      this.rightDown = false;
+      const held = performance.now() - this.rightDownAt;
+      const moved = Math.hypot(e.clientX - this.rightDownPos.x, e.clientY - this.rightDownPos.y);
+      if (held < 260 && moved < 14) this.emit('spin', { dir: Math.random() < 0.5 ? 1 : -1, side: 'Left' });
+      return;
+    }
     if (e.button !== 0 || !this.leftDown) return;
     this.leftDown = false;
     const now = performance.now();
@@ -135,7 +152,7 @@ export class MouseInput extends Emitter {
         this.emit('summon', {});
       } else {
         this.lastTapAt = now;
-        this.emit('dash', { toward: { x: this.ndc.x, y: this.ndc.y } });
+        this.emit('dash', { toward: { x: this.ndc.x, y: this.ndc.y }, ...(this.pairMode ? { side: 'Right' } : {}) });
       }
     }
   }
@@ -210,12 +227,12 @@ export class MouseInput extends Emitter {
     p.depth = this.depth;
     p.roll = this.roll;
     p.spread = this.spread;
-    p.pose = this.shift ? 'pinch' : this.leftDown ? 'fist' : 'open';
+    p.pose = this.shift ? 'pinch' : this.leftDown || this.rightDown ? 'fist' : 'open';
     p.pinch = this.shift ? 1 : 0;
     p.score = 1;
 
     const q = s.secondary;
-    q.present = this.twin && this.hasMoved;
+    q.present = this.twin && !this.pairMode && this.hasMoved; // pair mode has its own two-dagger scheme
     if (q.present) {
       q.pos.x = -this.ndc.x;
       q.pos.y = this.ndc.y;
@@ -225,13 +242,16 @@ export class MouseInput extends Emitter {
       q.pose = p.pose === 'pinch' ? 'open' : p.pose;
     }
 
+    s.buttons.left = this.leftDown;
+    s.buttons.right = this.rightDown;
     s.active = p.present;
     s.twoHands = p.present && q.present;
     s.handsDistance = s.twoHands ? Math.hypot(p.pos.x - q.pos.x, p.pos.y - q.pos.y) : 0;
     s.handsCenter.x = s.twoHands ? (p.pos.x + q.pos.x) / 2 : p.pos.x;
     s.handsCenter.y = s.twoHands ? (p.pos.y + q.pos.y) / 2 : p.pos.y;
     const MOUSE_LABELS = { open: 'HOVER', fist: 'FOLLOW', pinch: 'PRECISION' };
-    s.label = s.twoHands ? 'TWIN HANDS' : s.active ? MOUSE_LABELS[p.pose] || POSE_LABELS[p.pose] : 'MOVE THE MOUSE';
+    const pairLabel = this.leftDown && this.rightDown ? 'BOTH DAGGERS' : this.leftDown ? 'RIGHT DAGGER' : this.rightDown ? 'LEFT DAGGER' : 'DAGGER PAIR';
+    s.label = this.pairMode && s.active ? pairLabel : s.twoHands ? 'TWIN HANDS' : s.active ? MOUSE_LABELS[p.pose] || POSE_LABELS[p.pose] : 'MOVE THE MOUSE';
     return s;
   }
 }

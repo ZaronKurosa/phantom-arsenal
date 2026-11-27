@@ -34,7 +34,7 @@ const ARROWS = {
  *   'gameMode' {mode}                  keyboard 1/2/3/4 (and demo script)
  *   'act' {action, trigger, payload}   a physical trigger resolved through the ActionMap
  *   'dash' 'swipe' 'spin' 'teleport' 'cinematic' 'summon'   (demo script only)
- *   'reset' 'variant' 'fullscreen' 'help' 'preview' 'lab'
+ *   'reset' 'variant' 'weapon' 'fullscreen' 'help' 'preview' 'lab'
  */
 export class InputManager extends Emitter {
   constructor({ camera, tracker, gestures, mouseTarget, getGameMode, actionMap }) {
@@ -132,6 +132,12 @@ export class InputManager extends Emitter {
         return this.emit('gameMode', { mode: 'master' });
       case '4':
         return this.emit('gameMode', { mode: 'trial' });
+      case '5':
+      case '6':
+      case '7':
+      case '8':
+      case '9':
+        return e.repeat ? undefined : this.emit('weapon', { index: Number(k) - 5 });
       case 'Tab':
         e.preventDefault();
         return e.repeat ? undefined : this.emit('variant', {});
@@ -355,6 +361,7 @@ export class InputManager extends Emitter {
     if (prev === 'open' && pose === 'fist') go('cam.grab');
     else if (prev === 'fist' && pose === 'open') go('cam.release');
     if (pose === 'pinch') go('cam.pinchStart');
+    if (pose === 'two') go('cam.twoFingers');
   }
 
   /** Returns the ControlState of the active input. */

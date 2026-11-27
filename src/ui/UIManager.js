@@ -1,6 +1,6 @@
 import { Emitter } from '../utils/Emitter.js';
 import { HAND_CONNECTIONS } from '../tracking/HandTracker.js';
-import { VARIANTS } from '../swords/SwordGeometry.js';
+import { LOADOUTS } from '../weapons/WeaponRegistry.js';
 import { MODES } from '../swords/SwordController.js';
 
 const $ = (id) => document.getElementById(id);
@@ -19,7 +19,8 @@ const REFERENCE = {
       ['Rotate wrist', 'Tilts the sword. A fast twist makes it spin.'],
       ['Spread fingers', 'Expands the formation. Bring fingers together to collapse it.'],
       ['Swipe', 'Open-palm swipe changes formation (SOLO: dash).'],
-      ['Quick move', 'Fist or point flick: sword dashes (formation follows in a wave).'],
+      ['Point & flick', 'Point with one finger and flick fast: the sword dashes (formation follows in a wave).'],
+      ['Two fingers', 'Hold up index + middle finger. Shows TWO FINGERS; bind it to any action in the Gesture Lab.'],
       ['Two hands', 'Right hand leads, left hand places the formation. Hold both palms open for the cinematic formation.'],
       ['4 · TRIAL', 'Fly through rings and smash blocks. Each shows the move it needs; use any gesture you bound to it.'],
     ],
@@ -57,7 +58,8 @@ const REFERENCE = {
 const KEYS = [
   ['1 · 2 · 3 · 4', 'Switch mode'],
   ['G', 'Gesture Lab: rebind gestures, make tasks and courses'],
-  ['Tab', 'Next sword'],
+  ['Tab', 'Next weapon'],
+  ['5 · 6 · 7 · 8 · 9', 'Katana · Greatsword · Left dagger · Right dagger · Twin daggers'],
   ['R', 'Reset scene'],
   ['I', 'Next input'],
   ['F · H · B', 'Fullscreen · guide · preview'],
@@ -66,11 +68,14 @@ const KEYS = [
 /* ------------------------------------------------------------------ */
 /* Sword icons                                                          */
 /* ------------------------------------------------------------------ */
+const DAGGER = (flip) =>
+  `<g ${flip ? 'transform="translate(40 0) scale(-1 1)"' : ''}><path d="M13 14c-7 9-9 24-7 38h11c2-14 1-28-4-38z"/><path d="M4 54h20l-2 4H6z"/><path d="M9 54l-5 5 7-1z"/><rect x="11" y="58" width="4" height="18" rx="1"/><path d="M13 76l4 5-4 5-4-5z"/></g>`;
 const ICONS = {
-  nightfang: `<svg viewBox="0 0 40 90" fill="currentColor"><path d="M20 2l5 50h-10z"/><path d="M6 54c4 2 8 1 14 2 6-1 10 0 14-2l-2 5c-4 0-8 1-12 1s-8-1-12-1z"/><path d="M5 50l3 4-2 2zM35 50l-3 4 2 2z"/><rect x="18" y="58" width="4" height="22" rx="1"/><path d="M20 80l4 5-4 4-4-4z"/></svg>`,
-  wraith: `<svg viewBox="0 0 40 90" fill="currentColor"><path d="M17 3c10 8 13 30 11 50h-9c0-18-1-34-2-50z"/><path d="M12 54h18l-3 4H15z"/><path d="M20 49l-9 5 9-1z"/><rect x="18" y="58" width="4" height="22" rx="1"/><circle cx="20" cy="84" r="4" fill="none" stroke="currentColor" stroke-width="2"/></svg>`,
-  requiem: `<svg viewBox="0 0 40 90" fill="currentColor"><path d="M20 2c3 8 7 12 6 18 3 4 5 8 3 12 2 5 3 10 1 16H10c-2-6-1-11 1-16-2-4 0-8 3-12-1-6 3-10 6-18z"/><path d="M4 56c8 0 12 1 16 4 4-3 8-4 16-4l-3 12-7-6h-12l-7 6z"/><rect x="18" y="62" width="4" height="18" rx="1"/><path d="M20 80l5 5-5 5-5-5z"/></svg>`,
-  mixed: `<svg viewBox="0 0 40 90" fill="currentColor"><path d="M10 6l3 42H7z" opacity=".9"/><path d="M20 2l4 46h-8z"/><path d="M30 8c6 8 6 24 3 40h-5c1-14 0-28 2-40z" opacity=".9"/><path d="M4 50h32v3H4z"/><rect x="18" y="53" width="4" height="26"/><path d="M20 80l4 5-4 4-4-4z"/></svg>`,
+  katana: `<svg viewBox="0 0 40 90" fill="currentColor"><path d="M25 2c-8 13-11 33-9 52h6c-1-19 0-36 3-52z"/><ellipse cx="19" cy="57" rx="9" ry="3"/><rect x="16.5" y="59" width="5" height="22" rx="1"/><path d="M19 81l3 5-3 3-3-3z"/></svg>`,
+  greatsword: `<svg viewBox="0 0 40 90" fill="currentColor"><path d="M20 1l8 12v38H12V13z"/><path d="M2 40c2 8 8 12 18 12s16-4 18-12c-3 4-8 6-12 6l-3 5h-6l-3-5c-4 0-9-2-12-6z"/><path d="M6 52h28l-3 5H9z"/><rect x="17.5" y="57" width="5" height="20" rx="1"/><path d="M20 77l5 6-5 6-5-6z"/></svg>`,
+  'dagger-left': `<svg viewBox="0 0 40 90" fill="currentColor">${DAGGER(false)}</svg>`,
+  'dagger-right': `<svg viewBox="0 0 40 90" fill="currentColor">${DAGGER(true)}</svg>`,
+  twin: `<svg viewBox="0 0 80 90" fill="currentColor"><g transform="translate(-4 0)">${DAGGER(false)}</g><g transform="translate(44 0)">${DAGGER(true)}</g></svg>`,
 };
 
 /**
@@ -144,15 +149,17 @@ export class UIManager extends Emitter {
 
   _buildSwordPanel() {
     const grid = $('swordGrid');
-    const items = [...VARIANTS.map((v) => ({ id: v.id, name: v.name, title: v.desc })), { id: 'mixed', name: 'Mixed', title: 'A different blade in every slot' }];
-    for (const it of items) {
+    for (const l of LOADOUTS) {
       const b = document.createElement('button');
       b.className = 'sword-card';
-      b.dataset.variant = it.id;
+      b.dataset.weapon = l.id;
       b.dataset.ui = '';
-      b.title = it.title;
-      b.innerHTML = `${ICONS[it.id]}<span>${it.name.split(' ').pop()}</span>`;
-      b.addEventListener('click', () => this.emit('variant', { choice: it.id }));
+      b.title = `${l.name} (${l.key}): ${l.desc}`;
+      b.innerHTML = `${ICONS[l.id]}<span>${l.short}</span><kbd>${l.key}</kbd>`;
+      b.addEventListener('click', () => {
+        this.emit('weapon', { id: l.id });
+        b.blur(); // keep Space/Enter free for the scene instead of re-pressing this card
+      });
       grid.appendChild(b);
     }
   }
@@ -328,8 +335,12 @@ export class UIManager extends Emitter {
     if (el.textContent !== String(n)) el.textContent = String(n);
   }
 
-  setVariant(choice) {
-    for (const b of document.querySelectorAll('.sword-card')) b.classList.toggle('active', b.dataset.variant === choice);
+  /** highlight the equipped loadout; `state` ('dismissing' | 'entering' | 'idle') marks a switch in progress */
+  setWeapon(id, state = 'idle') {
+    for (const b of document.querySelectorAll('.sword-card')) {
+      b.classList.toggle('active', b.dataset.weapon === id);
+      b.classList.toggle('busy', b.dataset.weapon === id && state !== 'idle');
+    }
   }
 
   /** Call every frame with the raw frame time; updates the label twice a second. */

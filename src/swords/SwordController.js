@@ -2,7 +2,9 @@ import * as THREE from 'three';
 import { Sword } from './Sword.js';
 import { SwordFormation, FORMATIONS } from './SwordFormation.js';
 import { SwordAnimations } from './SwordAnimations.js';
-import { VARIANTS } from './SwordGeometry.js';
+import { WeaponManager } from '../weapons/WeaponManager.js';
+import { TwinDaggerController } from '../weapons/TwinDaggerController.js';
+import { DEFAULT_LOADOUT } from '../weapons/WeaponRegistry.js';
 import { FLOOR_Y } from '../scene/SceneManager.js';
 import { Emitter } from '../utils/Emitter.js';
 import { TAU, clamp, damp, easeInOutCubic, easeOutCubic, lerp, wrapAngle } from '../utils/MathUtils.js';
@@ -39,15 +41,26 @@ export class SwordController extends Emitter {
     this.formation = new SwordFormation();
     this.anim = new SwordAnimations(effects, sceneManager.lighting, sceneManager);
 
-    this.main = new Sword('nightfang', { role: 'main', scale: 1.3 });
+    // lead weapon, the twin-dagger partner (hidden unless the Twin Void Daggers are equipped) and the formation copies
+    this.main = new Sword(DEFAULT_LOADOUT, { role: 'main' });
+    this.partner = new Sword('dagger-left', { role: 'partner' });
     this.swords = [];
     for (let i = 0; i < FORMATION_COUNT; i++) {
-      const s = new Sword(VARIANTS[(i + 1) % VARIANTS.length].id, { role: 'formation', scale: 0.9 });
+      const s = new Sword(DEFAULT_LOADOUT, { role: 'formation' });
       s.slot = i;
       this.swords.push(s);
     }
     sceneManager.scene.add(this.main.group);
+    sceneManager.scene.add(this.partner.group);
     for (const s of this.swords) sceneManager.scene.add(s.group);
+
+    this.weapons = new WeaponManager(this, effects, sceneManager.lighting, sceneManager);
+    this.twin = new TwinDaggerController(this);
+    this.entryAnchor = new THREE.Vector3(0, 0.3, 0.5);
+    this.weapons.on('weapon', (e) => {
+      if (e.phase === 'entering') this.entryAnchor.copy(this.main.pos);
+      this.emit('weapon', e);
+    });
 
     this.mode = 'solo';
     this.actions = null; // ActionMap (needed to expand custom tasks)
@@ -62,7 +75,6 @@ export class SwordController extends Emitter {
     this.openHold = 0;
     this.fistHold = 0;
     this.summonCooldown = 0;
-    this.variantChoice = 'mixed';
     this.time = 0;
     this.mainTarget = new THREE.Vector3(0, 0, 0.5);
     this.slotTargets = this.swords.map(() => new THREE.Vector3());
@@ -75,6 +87,12 @@ export class SwordController extends Emitter {
     this.main.glowTarget = 0.5;
     this.main.idleSpinSpeed = 0.6;
     for (const s of this.swords) s.idleSpinSpeed = 0.35 * (s.slot % 2 ? 1 : -1);
+    this.partner.glowTarget = 0.5;
+    this.partner.idleSpinSpeed = 0.7;
+    this.partner.show(false);
+    this.partner.group.visible = false;
+    // the katana starts fully formed (the title backdrop); its awakening plays when the chamber wakes or when it is selected
+    this.main.model.userData.awakening?.finish();
   }
 
   /* ------------------------------------------------------------------ */
@@ -82,7 +100,7 @@ export class SwordController extends Emitter {
   /* ------------------------------------------------------------------ */
 
   get activeCount() {
-    let n = this.main.appearTarget === 1 ? 1 : 0;
+    let n = (this.main.appearTarget === 1 ? 1 : 0) + (this.partner.appearTarget === 1 ? 1 : 0);
     for (const s of this.swords) if (s.appearTarget === 1) n++;
     return n;
   }
@@ -102,36 +120,22 @@ export class SwordController extends Emitter {
     if (changed) {
       this.fx.shockwave(this.main.group.position, this.main.color, 3, 0.7);
       this.sm.lighting.pulse(0.5);
-      this.anim.flourish(this.main, { strength: 1.2 });
-      this.main.show(true);
+      if (!this.weapons.transitioning) {
+        this.anim.flourish(this.main, { strength: 1.2 });
+        this.main.show(true);
+      }
       if (announce) this.emit('action', { name: `MODE · ${MODES[mode].name}` });
     }
     this.emit('mode', { mode });
   }
 
-  setVariantChoice(choice) {
-    const ids = VARIANTS.map((v) => v.id);
-    if (choice !== 'mixed' && !ids.includes(choice)) return;
-    this.variantChoice = choice;
-    if (choice === 'mixed') {
-      this.main.setVariant('nightfang');
-      this.swords.forEach((s, i) => s.setVariant(VARIANTS[(i + 1) % VARIANTS.length].id));
-    } else {
-      this.main.setVariant(choice);
-      for (const s of this.swords) s.setVariant(choice);
-    }
-    this.anim.flourish(this.main, { strength: 1.3 });
-    this.swords.forEach((s, i) => this.anim.flourish(s, { delay: i * 0.04 }));
-    this.fx.shockwave(this.main.group.position, this.main.color, 2.4, 0.6);
-    this.sm.lighting.pulse(0.4);
-    this.emit('variant', { choice });
+  /** Equip a loadout (katana, greatsword, left / right dagger, twin daggers). The switcher plays the entry animation. */
+  selectWeapon(id, opts) {
+    return this.weapons.select(id, opts);
   }
 
-  cycleVariant() {
-    const order = [...VARIANTS.map((v) => v.id), 'mixed'];
-    const next = order[(order.indexOf(this.variantChoice) + 1) % order.length];
-    this.setVariantChoice(next);
-    return next;
+  cycleWeapon(dir = 1) {
+    return this.weapons.cycle(dir);
   }
 
   reset() {
@@ -153,6 +157,7 @@ export class SwordController extends Emitter {
     this.main.appear = 0;
     this.main.show(true);
     this.anim.flourish(this.main);
+    this.partner.teleportTo(this.main.pos);
     for (const s of this.swords) {
       s.scaleMul = 1;
       s.spinAngle = 0;
@@ -162,7 +167,10 @@ export class SwordController extends Emitter {
       s.show(false);
     }
     this._wasDeployed = false;
-    this.setVariantChoice('mixed');
+    this.weapons.anims.clear();
+    this.twin.reset();
+    this.weapons.select(DEFAULT_LOADOUT, { instant: true });
+    this.main.show(true);
     this.sm.lighting.pulse(0.7);
     this.emit('action', { name: 'SCENE RESET' });
     this.emit('formation', { name: this.formation.type.name });
@@ -195,6 +203,8 @@ export class SwordController extends Emitter {
 
   /** Discrete events from any input source. */
   trigger(name, payload = {}) {
+    // while a weapon is arriving or leaving, its animation owns the blade
+    if (this.weapons.blocksActions && (name === 'dash' || name === 'spin' || name === 'teleport' || name === 'cinematic')) return;
     this._markFired(name);
     switch (name) {
       case 'dash':
@@ -221,7 +231,7 @@ export class SwordController extends Emitter {
       case 'reset':
         return this.reset();
       case 'variant':
-        return this.cycleVariant();
+        return this.cycleWeapon();
       default:
     }
   }
@@ -234,12 +244,20 @@ export class SwordController extends Emitter {
     return this.deployed || this.time < this.echoUntil || !!this.cinematic;
   }
 
-  _dirFrom(payload) {
+  /** Which blades an action applies to: the lead alone, or (twin daggers) the dagger of payload.side / both. */
+  _actors(payload) {
+    if (!this.weapons.twinActive) return [this.main];
+    if (payload.side === 'Left') return [this.partner];
+    if (payload.side === 'Right') return [this.main];
+    return [this.main, this.partner];
+  }
+
+  _dirFrom(payload, sword = this.main) {
     if (payload.dir) return _d.set(payload.dir.x, payload.dir.y, payload.dir.z ?? 0).normalize().clone();
     if (payload.toward) {
       // mouse click: lunge from the sword toward the cursor
       const depth = this._ctl?.primary.depth ?? 0.5;
-      this.sm.worldFromNDC(payload.toward.x, payload.toward.y, depth, _d).sub(this.main.pos);
+      this.sm.worldFromNDC(payload.toward.x, payload.toward.y, depth, _d).sub(sword.pos);
       if (_d.lengthSq() > 0.6) return _d.normalize().clone();
     }
     return new THREE.Vector3(0, 0.15, -1).normalize();
@@ -248,7 +266,7 @@ export class SwordController extends Emitter {
   _dash(payload) {
     if (this.cinematic) return;
     const dir = this._dirFrom(payload);
-    this.anim.dash(this.main, dir, { dist: 3.6 });
+    for (const a of this._actors(payload)) this.anim.dash(a, a === this.main ? dir : this._dirFrom(payload, a), { dist: 3.6 });
     if (this._effectiveDeployed()) {
       this.swords.forEach((s, i) => this.anim.dash(s, dir, { dist: 2.4 + (i % 3) * 0.4, delay: 0.05 + i * 0.045 }));
     }
@@ -302,7 +320,7 @@ export class SwordController extends Emitter {
   _spin(payload) {
     if (this.cinematic) return;
     const dir = payload.dir || 1;
-    this.anim.spin(this.main, { dir, turns: 2 });
+    for (const a of this._actors(payload)) this.anim.spin(a, { dir, turns: 2 });
     if (this.mode === 'arsenal' || (this.mode === 'master' && this._effectiveDeployed())) {
       this.swords.forEach((s, i) => this.anim.spin(s, { dir: i % 2 ? dir : -dir, turns: 2, delay: 0.08 + i * 0.07 }));
     }
@@ -312,8 +330,10 @@ export class SwordController extends Emitter {
   _teleport(payload) {
     if (this.cinematic) return;
     this.pinchAnchor = null; // release: follow raw hand position again
-    this.main.holdUntil = this.time + 0.24;
-    this.anim.teleport(this.main, () => this._mainTargetNow(), { dur: 0.45 });
+    for (const a of this._actors(payload)) {
+      a.holdUntil = this.time + 0.24;
+      this.anim.teleport(a, () => (a === this.main ? this._mainTargetNow() : _p.copy(a.target)), { dur: 0.45 });
+    }
     if (this._effectiveDeployed()) {
       this.swords.forEach((s, i) =>
         this.anim.teleport(s, () => _p.copy(this._formationSlotWorld(i)), { dur: 0.45, delay: 0.06 + i * 0.05 }),
@@ -364,6 +384,7 @@ export class SwordController extends Emitter {
   }
 
   _formationCenter(out) {
+    if (this.weapons.twinActive) return out.copy(this.main.pos).add(this.partner.pos).multiplyScalar(0.5);
     if (this.mode === 'master' && this._ctl?.twoHands) {
       return this.sm.worldFromNDC(this._ctl.secondary.pos.x, this._ctl.secondary.pos.y, this._ctl.secondary.depth, out);
     }
@@ -385,8 +406,10 @@ export class SwordController extends Emitter {
     this.formation.update(dt);
     this.anim.update(dt, time);
 
+    this.weapons.update(dt, time);
     this._updateGestureState(dt, ctl);
     this._updateMain(dt, time, ctl);
+    this._updatePartner(dt, time, ctl);
 
     const eff = this._effectiveDeployed();
     if (eff !== this._wasDeployed) {
@@ -398,6 +421,7 @@ export class SwordController extends Emitter {
     this._updateCinematic(dt);
 
     this.main.update(dt, time);
+    this.partner.update(dt, time);
     for (const s of this.swords) s.update(dt, time);
     this._emitTrails();
   }
@@ -452,6 +476,15 @@ export class SwordController extends Emitter {
 
     if (this.cinematic) return; // cinematic drives the main sword
 
+    if (this.weapons.twinActive) {
+      // two daggers, one per hand (or the mouse buttons): see TwinDaggerController
+      this.twin.update(dt, time, ctl);
+      this.mainTarget.copy(m.target);
+      for (const s of [m, this.partner]) if (time < (s.holdUntil || 0)) s.target.copy(s.pos);
+      this.sm.setParallax(ctl.active ? ctl.primary.pos.x * 0.6 : 0, ctl.active ? ctl.primary.pos.y * 0.5 : 0);
+      return;
+    }
+
     if (ctl.active && h.present) {
       this.sm.worldFromNDC(h.pos.x, h.pos.y, h.depth, this.mainTarget);
 
@@ -497,6 +530,31 @@ export class SwordController extends Emitter {
       m.setUpright(roll + lean, 0, -m.pos.x * 0.03);
     }
     m.target.y = Math.max(m.target.y, FLOOR_Y + 1.5);
+
+    // a freshly summoned weapon (the katana's awakening) floats where it was summoned and only gradually
+    // hands itself over to the hand / mouse, so the cinematic is not yanked around
+    const ctrl = this.weapons.control;
+    if (ctrl < 1) {
+      m.target.lerpVectors(this.entryAnchor, m.target, ctrl * ctrl);
+      m.smoothTime = lerp(0.9, m.smoothTime, ctrl);
+    }
+  }
+
+  /** the second dagger: follows the lead during the cinematic, hides itself and waits otherwise */
+  _updatePartner(dt, time, ctl) {
+    const p = this.partner;
+    if (this.weapons.twinActive) {
+      if (this.cinematic) {
+        p.target.copy(this.main.target).add(_v.set(-1.3, 0, 0));
+        p.smoothTime = 0.18;
+        p.setUpright(0);
+      }
+      return;
+    }
+    if (p.appear < 0.01 && p.appearTarget === 0) {
+      p.target.copy(this.main.pos);
+      p.pos.copy(this.main.pos);
+    }
   }
 
   _summonFormation() {
@@ -675,7 +733,10 @@ export class SwordController extends Emitter {
 
   _emitTrails() {
     const m = this.main;
-    if (m.speed > 2.2 && m.appear > 0.5) this.fx.trail(m.group.position, m.vel, m.color, m.speed * 0.25);
+    const dagger = m.model.userData.kind === 'dagger';
+    if (m.speed > (dagger ? 1 : 2.2) && m.appear > 0.5) this.fx.trail(m.group.position, m.vel, m.color, m.speed * (dagger ? 0.35 : 0.25));
+    const p = this.partner;
+    if (p.appearTarget === 1 && p.speed > 1 && p.appear > 0.5) this.fx.trail(p.group.position, p.vel, p.color, p.speed * 0.35);
     for (const s of this.swords) {
       if (s.speed > 3 && s.appear > 0.5 && Math.random() < 0.5) this.fx.trail(s.group.position, s.vel, s.color, 1);
     }
